@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'pushgateway'
+    static_configs:
+      - targets: ['pushgateway:9091']
+
+  - job_name: 'metrics-service'
+    static_configs:
+      - targets: ['metrics-service:8002']
+
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+
+  - job_name: 'zookeeper'
+    static_configs:
+      - targets: ['zookeeper-exporter:9141']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

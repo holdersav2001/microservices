@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-trade-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-trade-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-trade-consumer
+    spec:
+      containers:
+      - name: kafka-trade-consumer
+        image: kafka-trade-consumer:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: EVENT_PROCESSING_SERVICE_URL
+          value: "http://event-processing-service:8001"

@@ -1,0 +1,33 @@
+
+# 2024-10-03 14:25:25.845337
++N
+
+# 2024-10-03 14:27:45.916352
++n
+
+# 2024-10-03 14:27:53.206052
++n
+
+# 2024-10-03 14:38:02.275323
++/architect
+
+# 2024-10-03 14:38:28.403221
++/add c:\Users\holde\new-development\microservices\event_definition.yaml c:\Users\holde\new-development\microservices\kafka_trade_consumer_7.py c:\Users\holde\new-development\microservices\mongodb_helper_batch.py c:\Users\holde\new-development\microservices\event_services_batch.py
+
+# 2024-10-03 14:39:22.548757
++I need to convert this code to microservices. how would you suggest it should be organised. also the kafka_trade_consumer_7.py uses asynch and multiple tasks; is this correct for microservices
+
+# 2024-10-03 14:54:07.678949
++y
+
+# 2024-10-03 14:54:24.820066
++n
+
+# 2024-10-03 14:55:00.368139
++/code
+
+# 2024-10-03 14:56:13.926405
++convert above code into a microservice architecture. the different services will communicate using kafka. as you write code add documentation include high level dscriptions of inputs and output
+
+# 2024-10-03 14:57:11.616777
++/models

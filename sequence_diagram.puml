@@ -1,0 +1,54 @@
+@startuml
+!theme plain
+title Microservices Architecture for Trade Event Processing
+
+actor "External Trade Event Source" as Source
+participant "Zookeeper" as ZK
+participant "Kafka Broker" as Kafka
+participant "Kafka\nTrade Events Topic" as InitialTopic
+participant "Kafka Trade Consumer" as Consumer
+participant "Kafka\nTrades Consumed Topic" as ConsumedTopic
+participant "Event Processing Service" as Processor
+database MongoDB as DB
+participant "Metrics Service" as Metrics
+participant "Prometheus\nPushgateway" as PushGW
+participant Prometheus as Prom
+participant Grafana as Graf
+
+Source -> Kafka: Publish trade event (localhost:29092)
+Kafka <-> ZK: Manage broker metadata
+
+Kafka -> InitialTopic: Route trade event
+InitialTopic -> Consumer: Consume trade event
+activate Consumer
+
+Consumer -> Consumer: Process trade event
+alt Successful processing
+    Consumer -> ConsumedTopic: Publish processed event
+else Processing error
+    Consumer -> Kafka: Publish to error topic
+end
+Consumer -> Kafka: Commit offset
+deactivate Consumer
+
+ConsumedTopic -> Processor: Consume processed event
+activate Processor
+
+Processor -> Processor: Validate event
+Processor -> DB: Store processed trade events in batch
+note right
+  Stored data includes:
+  - Trade details
+  - Timestamp
+  - Processing metadata
+end note
+Processor -> Kafka: Commit offset
+deactivate Processor
+
+Consumer ->> Metrics: Send processing metrics
+Processor ->> Metrics: Send processing metrics
+Metrics ->> PushGW: Push metrics
+PushGW -> Prom: Scrape metrics
+Prom -> Graf: Visualize metrics
+
+@enduml

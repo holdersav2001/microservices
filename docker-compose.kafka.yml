@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # Zookeeper service configuration
+  zookeeper:
+    image: wurstmeister/zookeeper:latest  # Using the latest Zookeeper image from wurstmeister
+    container_name: zookeeper  # Naming the container as 'zookeeper'
+    ports:
+      - "2181:2181"  # Exposing port 2181 for Zookeeper client connections
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181  # Setting the client port for Zookeeper
+      ZOOKEEPER_TICK_TIME: 2000  # Setting tick time, which is the basic time unit in milliseconds used by Zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]  # Health check to ensure Zookeeper is up and listening on port 2181
+      interval: 10s  # Interval between health check attempts
+      timeout: 5s  # Timeout for each health check
+      retries: 5  # Number of retries before considering the container as unhealthy
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+  # Kafka broker configuration
+  kafka:
+    image: wurstmeister/kafka:latest  # Using the latest Kafka image from wurstmeister
+    container_name: kafka  # Naming the container as 'kafka'
+    ports:
+      - "9092:9092"  # Exposing port 9092 for Kafka connections
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092  # Use container name instead of 'localhost'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_CREATE_TOPICS: "trade_events:1:1,trade_events_consumed:1:1,trade_events_errors:1:1"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092  # Defining the listeners for Kafka
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181  # Connecting Kafka to Zookeeper on port 2181
+      KAFKA_BROKER_ID: 1  # Setting a unique broker ID for Kafka
+      JMX_PORT: 9999  # Port for JMX monitoring
+    depends_on:
+      zookeeper:
+        condition: service_healthy  # Kafka depends on Zookeeper being healthy before starting
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]  # Health check to ensure Kafka is up and listening on port 9092
+      interval: 10s  # Interval between health check attempts
+      timeout: 5s  # Timeout for each health check
+      retries: 5  # Number of retries before considering the container as unhealthy
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+
+  # MongoDB service configuration
+  mongodb:
+    image: mongo:latest  # Using the latest MongoDB image
+    container_name: mongodb-realtime  # Naming the container as 'mongodb'
+    ports:
+      - "27017:27017"  # Exposing port 27017 for MongoDB connections
+    volumes:
+      - mongodb_data:/data/db  # Persisting MongoDB data using a named volume
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+  # Kafka exporter for Prometheus
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest  # Using the latest Kafka exporter image
+    container_name: kafka-exporter  # Naming the container as 'kafka-exporter'
+    command:
+      - '--kafka.server=kafka:9092'  # Configuring Kafka exporter to connect to Kafka broker
+    ports:
+      - "9308:9308"  # Exposing port 9308 for metrics
+    depends_on:
+      kafka:
+        condition: service_healthy  # Kafka exporter depends on Kafka being healthy before starting
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+  # Prometheus service configuration
+  prometheus:
+    image: prom/prometheus:latest  # Using the latest Prometheus image
+    container_name: prometheus  # Naming the container as 'prometheus'
+    ports:
+      - "9090:9090"  # Exposing port 9090 for Prometheus web UI
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml  # Mounting custom Prometheus configuration
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'  # Setting the configuration file for Prometheus
+    depends_on:
+      - kafka-exporter  # Prometheus depends on Kafka exporter being available
+      - mongodb  # Prometheus also depends on MongoDB being available
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+  # Grafana service configuration
+  grafana:
+    image: grafana/grafana:latest  # Using the latest Grafana image
+    container_name: grafana  # Naming the container as 'grafana'
+    ports:
+      - "3000:3000"  # Exposing port 3000 for Grafana web UI
+    depends_on:
+      - prometheus  # Grafana depends on Prometheus being available
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+  # Pushgateway service configuration
+  pushgateway:
+    image: prom/pushgateway:latest  # Using the latest Pushgateway image
+    container_name: pushgateway  # Naming the container as 'pushgateway'
+    ports:
+      - "9091:9091"  # Exposing port 9091 for Pushgateway
+    networks:
+      - kafka-network  # Connecting to the custom network 'kafka-network'
+
+# Custom bridge network for inter-service communication
+networks:
+  kafka-network:
+    driver: bridge  # Using bridge driver for isolated communication between services
+
+# Named volumes for data persistence
+volumes:
+  mongodb_data:  # Volume for MongoDB data persistence

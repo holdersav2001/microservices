@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-service
+  template:
+    metadata:
+      labels:
+        app: metrics-service
+    spec:
+      containers:
+      - name: metrics-service
+        image: metrics-service:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: PROMETHEUS_PUSHGATEWAY
+          value: "pushgateway-service:9091"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-service
+spec:
+  selector:
+    app: metrics-service
+  ports:
+    - protocol: TCP
+      port: 8002
+      targetPort: 8002

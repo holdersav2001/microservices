@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-processing-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-processing-service
+  template:
+    metadata:
+      labels:
+        app: event-processing-service
+    spec:
+      containers:
+      - name: event-processing-service
+        image: event-processing-service:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: MONGO_URI
+          value: "mongodb://mongodb-service:27017"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-processing-service
+spec:
+  selector:
+    app: event-processing-service
+  ports:
+    - protocol: TCP
+      port: 8001
+      targetPort: 8001
