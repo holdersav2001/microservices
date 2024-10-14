@@ -11,6 +11,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import ConsumerStoppedError, KafkaConnectionError
 from logging.handlers import RotatingFileHandler
 import time
+import pyinstrument
 
 class PerformanceStats:
     def __init__(self, logger: logging.Logger):
@@ -19,12 +20,27 @@ class PerformanceStats:
         self.total_time = 0
         self.max_time = float('-inf')
         self.min_time = float('inf')
+        self.batch_start_time = None
+        self.batch_messages = 0
 
     def update(self, messages: int, process_time: float):
         self.total_messages += messages
         self.total_time += process_time
         self.max_time = max(self.max_time, process_time)
         self.min_time = min(self.min_time, process_time)
+        
+        if self.batch_start_time is None:
+            self.batch_start_time = time.time()
+        
+        self.batch_messages += messages
+        
+        if self.batch_messages >= 1000:
+            batch_end_time = time.time()
+            batch_elapsed_time = batch_end_time - self.batch_start_time
+            self.logger.info(f"Batch Statistics: Processed {self.batch_messages} messages in {batch_elapsed_time:.2f} seconds")
+            self.logger.info(f"Start time: {datetime.fromtimestamp(self.batch_start_time)}, End time: {datetime.fromtimestamp(batch_end_time)}")
+            self.batch_start_time = None
+            self.batch_messages = 0
 
     def log_stats(self):
         avg_time = self.total_time / self.total_messages if self.total_messages > 0 else 0
@@ -42,7 +58,7 @@ class ConfigLoader:
 
     def _load_config(self) -> Dict[str, str]:
         config = {
-            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092'),
+            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             'KAFKA_TOPIC': os.getenv('KAFKA_TOPIC', 'trade_events'),
             'KAFKA_GROUP_ID': os.getenv('KAFKA_GROUP_ID', 'trade_consumer_group'),
             'KAFKA_DLQ_TOPIC': os.getenv('KAFKA_DLQ_TOPIC', 'trade_events_errors'),
@@ -63,6 +79,7 @@ class KafkaTradeConsumer:
         self.running = False
         self.batch_size = 100
         self.stats = PerformanceStats(stats_logger)
+        self.profiler = pyinstrument.Profiler()
 
     async def setup_consumer(self) -> None:
         max_retries = 30
@@ -157,6 +174,7 @@ class KafkaTradeConsumer:
         self.running = True
 
         try:
+            self.profiler.start()
             while self.running:
                 try:
                     messages = await self.consumer.getmany(timeout_ms=1000, max_records=self.batch_size)
@@ -182,6 +200,11 @@ class KafkaTradeConsumer:
                     await asyncio.sleep(5)  # Add a delay before retrying
 
         finally:
+            self.profiler.stop()
+            profiling_data = self.profiler.output_text(unicode=True, color=True)
+            with open('pyinstrument_profiling.log', 'w', encoding='utf-8') as f:
+                f.write(profiling_data)
+            self.logger.info(f"Pyinstrument profiling data written to pyinstrument_profiling.log")
             await self.cleanup()
             self.stats.log_stats()
 

@@ -1,2 +1,2 @@
-aiokafka==0.8.0
-asyncio==3.4.3
+aiokafka==0.7.2
+pyinstrument==4.4.1

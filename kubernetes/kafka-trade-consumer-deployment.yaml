@@ -14,9 +14,16 @@ spec:
     spec:
       containers:
       - name: kafka-trade-consumer
-        image: kafka-trade-consumer:latest
+        image: kafka-trade-consumer:v2
+        imagePullPolicy: Never
         env:
         - name: KAFKA_BOOTSTRAP_SERVERS
-          value: "kafka-service:9092"
-        - name: EVENT_PROCESSING_SERVICE_URL
-          value: "http://event-processing-service:8001"
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC
+          value: "trade_events"
+        - name: KAFKA_GROUP_ID
+          value: "trade_consumer_group"
+        - name: KAFKA_DLQ_TOPIC
+          value: "trade_events_errors"
+        - name: KAFKA_PROCESSED_TOPIC
+          value: "trade_events_consumed"
