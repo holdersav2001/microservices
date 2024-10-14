@@ -1,0 +1,54 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+pyinstrument_profiling.log
+
+# Environment files
+.env
+.venv/
+
+# Editor directories and files
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Compiled binaries
+*.so
+*.dll
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+var/
+*.egg-info/
+*.egg
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+.coverage
+.tox/
+nosetests.xml
+htmlcov/
+
+# Translations
+*.mo
+
+# Miscellaneous
+.DS_Store
+Thumbs.db
+
+# Aider files
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v3/
