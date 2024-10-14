@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from configparser import ConfigParser
-from typing import Dict, Any
+from typing import Dict, Any, List
 import fastjsonschema
 import asyncio
 from aiokafka import AIOKafkaConsumer
@@ -20,12 +20,31 @@ class PerformanceStats:
         self.total_time = 0
         self.max_time = float('-inf')
         self.min_time = float('inf')
+        self.batch_start_time = None
+        self.batch_events = 0
+        self.batch_mongo_time = 0
 
-    def update(self, process_time: float):
+    def update(self, process_time: float, mongo_time: float):
         self.total_events += 1
         self.total_time += process_time
         self.max_time = max(self.max_time, process_time)
         self.min_time = min(self.min_time, process_time)
+        
+        if self.batch_start_time is None:
+            self.batch_start_time = time.time()
+        
+        self.batch_events += 1
+        self.batch_mongo_time += mongo_time
+        
+        if self.batch_events >= 1000:
+            batch_end_time = time.time()
+            batch_elapsed_time = batch_end_time - self.batch_start_time
+            self.logger.info(f"Batch Statistics: Processed {self.batch_events} events in {batch_elapsed_time:.2f} seconds")
+            self.logger.info(f"Start time: {datetime.fromtimestamp(self.batch_start_time)}, End time: {datetime.fromtimestamp(batch_end_time)}")
+            self.logger.info(f"Total MongoDB interaction time: {self.batch_mongo_time:.2f} seconds")
+            self.batch_start_time = None
+            self.batch_events = 0
+            self.batch_mongo_time = 0
 
     def log_stats(self):
         avg_time = self.total_time / self.total_events if self.total_events > 0 else 0
@@ -40,15 +59,22 @@ class ConfigLoader:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.config = self._load_config()
+        self._log_config()
 
     def _load_config(self) -> Dict[str, str]:
-        return {
-            'MONGO_URI': os.getenv('MONGO_URI', 'mongodb://mongodb:27017/realtime'),
+        config = {
+            'MONGO_URI': os.getenv('MONGO_URI', 'mongodb://192.168.0.120:27017/realtime'),
             'MONGO_COLLECTION': os.getenv('MONGO_COLLECTION', 'trade_events'),
-            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092'),
+            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', '192.168.0.120:9092'),
             'KAFKA_TOPIC': os.getenv('KAFKA_TOPIC', 'trade_events_consumed'),
             'KAFKA_GROUP_ID': os.getenv('KAFKA_GROUP_ID', 'event_processing_group'),
         }
+        return config
+
+    def _log_config(self):
+        self.logger.info("Configuration:")
+        for key, value in self.config.items():
+            self.logger.info(f"{key}: {value}")
 
     def get(self, key: str) -> str:
         return self.config.get(key, '')
@@ -110,9 +136,13 @@ class EventProcessor:
             raise ValueError("Invalid message format")
 
         transformed_event = self.transform_message(trade_event)
+        
+        mongo_start_time = time.time()
         result = self.event_services.insert_event(transformed_event)
+        mongo_time = time.time() - mongo_start_time
+        
         process_time = time.time() - start_time
-        self.stats.update(process_time)
+        self.stats.update(process_time, mongo_time)
         
         if result['success']:
             self.logger.debug(f"Processed and buffered event: {transformed_event}")
@@ -131,26 +161,39 @@ class KafkaEventConsumer:
         self.running = False
 
     async def setup_consumer(self):
-        max_retries = 5
-        retry_delay = 5  # seconds
+        max_retries = 30
+        retry_delay = 10  # seconds
 
         for attempt in range(max_retries):
             try:
+                bootstrap_servers = self.config.get('KAFKA_BOOTSTRAP_SERVERS')
+                bootstrap_servers_list = [server.strip() for server in bootstrap_servers.split(',')]
+                self.logger.info(f"Attempting to connect to Kafka at {bootstrap_servers} (attempt {attempt + 1}/{max_retries})")
+                self.logger.info(f"KAFKA_TOPIC: {self.config.get('KAFKA_TOPIC')}")
+                self.logger.info(f"KAFKA_GROUP_ID: {self.config.get('KAFKA_GROUP_ID')}")
+                self.logger.info(f"Environment variable KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
                 self.consumer = AIOKafkaConsumer(
                     self.config.get('KAFKA_TOPIC'),
-                    bootstrap_servers=self.config.get('KAFKA_BOOTSTRAP_SERVERS'),
+                    bootstrap_servers=bootstrap_servers_list,
                     group_id=self.config.get('KAFKA_GROUP_ID'),
-                    auto_offset_reset='earliest'
+                    auto_offset_reset='earliest',
+                    enable_auto_commit=False,
+                    session_timeout_ms=45000,
+                    heartbeat_interval_ms=15000,
+                    max_poll_interval_ms=300000,
+                    max_poll_records=500
                 )
                 await self.consumer.start()
                 self.logger.info(f"Kafka consumer started. Listening to topic: {self.config.get('KAFKA_TOPIC')}")
                 return
             except KafkaConnectionError as e:
+                self.logger.error(f"Failed to connect to Kafka (attempt {attempt + 1}/{max_retries}). Error: {str(e)}")
+                self.logger.error(f"Error details: {e.__class__.__name__}: {str(e)}")
                 if attempt < max_retries - 1:
-                    self.logger.warning(f"Failed to connect to Kafka (attempt {attempt + 1}/{max_retries}). Retrying in {retry_delay} seconds...")
+                    self.logger.info(f"Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                 else:
-                    self.logger.error(f"Failed to connect to Kafka after {max_retries} attempts: {e}")
+                    self.logger.error(f"Failed to connect to Kafka after {max_retries} attempts. Giving up.")
                     raise
 
     async def consume_messages(self):
@@ -184,6 +227,10 @@ def setup_logger(name: str, log_file: str, level=logging.INFO) -> logging.Logger
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
     return logger
 
 async def main():
@@ -200,12 +247,9 @@ async def main():
 
     try:
         await kafka_consumer.setup_consumer()
-    except Exception as e:
-        logger.error(f"Failed to set up consumer: {e}")
-        return
-
-    try:
         await kafka_consumer.consume_messages()
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
     except KeyboardInterrupt:
         logger.info("Received interrupt, shutting down...")
     finally:
