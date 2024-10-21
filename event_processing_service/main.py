@@ -2,58 +2,17 @@ import os
 import json
 import logging
 from datetime import datetime, timezone
-from configparser import ConfigParser
-from typing import Dict, Any, List
-import fastjsonschema
+from typing import Dict, Any
 import asyncio
+import time
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaConnectionError
 from logging.handlers import RotatingFileHandler
 from services.event_services_batch import EventServicesBatch
-from helpers.mongodb_helper_batch import MongoDBHelperBatch
-import time
-
-class PerformanceStats:
-    def __init__(self, logger: logging.Logger):
-        self.logger = logger
-        self.total_events = 0
-        self.total_time = 0
-        self.max_time = float('-inf')
-        self.min_time = float('inf')
-        self.batch_start_time = None
-        self.batch_events = 0
-        self.batch_mongo_time = 0
-
-    def update(self, process_time: float, mongo_time: float):
-        self.total_events += 1
-        self.total_time += process_time
-        self.max_time = max(self.max_time, process_time)
-        self.min_time = min(self.min_time, process_time)
-        
-        if self.batch_start_time is None:
-            self.batch_start_time = time.time()
-        
-        self.batch_events += 1
-        self.batch_mongo_time += mongo_time
-        
-        if self.batch_events >= 1000:
-            batch_end_time = time.time()
-            batch_elapsed_time = batch_end_time - self.batch_start_time
-            self.logger.info(f"Batch Statistics: Processed {self.batch_events} events in {batch_elapsed_time:.2f} seconds")
-            self.logger.info(f"Start time: {datetime.fromtimestamp(self.batch_start_time)}, End time: {datetime.fromtimestamp(batch_end_time)}")
-            self.logger.info(f"Total MongoDB interaction time: {self.batch_mongo_time:.2f} seconds")
-            self.batch_start_time = None
-            self.batch_events = 0
-            self.batch_mongo_time = 0
-
-    def log_stats(self):
-        avg_time = self.total_time / self.total_events if self.total_events > 0 else 0
-        self.logger.info("Event Processing Service Performance Statistics:")
-        self.logger.info(f"Total events processed: {self.total_events}")
-        self.logger.info(f"Total processing time: {self.total_time:.2f} seconds")
-        self.logger.info(f"Average processing time per event: {avg_time:.6f} seconds")
-        self.logger.info(f"Maximum event processing time: {self.max_time:.6f} seconds")
-        self.logger.info(f"Minimum event processing time: {self.min_time:.6f} seconds")
+from helpers.mongodb_helper_batch import AsyncMongoDBHelperBatch
+from helpers.redis_helper_batch import AsyncRedisHelperBatch
+import fastjsonschema
+import pyinstrument
 
 class ConfigLoader:
     def __init__(self, logger: logging.Logger):
@@ -63,11 +22,14 @@ class ConfigLoader:
 
     def _load_config(self) -> Dict[str, str]:
         config = {
-            'MONGO_URI': os.getenv('MONGO_URI', 'mongodb://192.168.0.120:27017/realtime'),
+            'MONGO_URI': os.getenv('MONGO_URI', 'mongodb://localhost:27017/eventdb'),
             'MONGO_COLLECTION': os.getenv('MONGO_COLLECTION', 'trade_events'),
-            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', '192.168.0.120:9092'),
+            'KAFKA_BOOTSTRAP_SERVERS': os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092'),
             'KAFKA_TOPIC': os.getenv('KAFKA_TOPIC', 'trade_events_consumed'),
             'KAFKA_GROUP_ID': os.getenv('KAFKA_GROUP_ID', 'event_processing_group'),
+            'REDIS_HOST': os.getenv('REDIS_HOST', 'localhost'),
+            'REDIS_PORT': os.getenv('REDIS_PORT', '6379'),
+            'REDIS_DB': os.getenv('REDIS_DB', '0'),
         }
         return config
 
@@ -80,11 +42,10 @@ class ConfigLoader:
         return self.config.get(key, '')
 
 class EventProcessor:
-    def __init__(self, event_services: EventServicesBatch, logger: logging.Logger, stats_logger: logging.Logger):
+    def __init__(self, event_services: EventServicesBatch, logger: logging.Logger):
         self.event_services = event_services
         self.logger = logger
         self.validate = self._create_validator()
-        self.stats = PerformanceStats(stats_logger)
 
     def _create_validator(self):
         schema = {
@@ -130,19 +91,13 @@ class EventProcessor:
             }
         }
 
-    def process_message(self, trade_event: Dict[str, Any]) -> Dict[str, Any]:
-        start_time = time.time()
+    async def process_message(self, trade_event: Dict[str, Any]) -> Dict[str, Any]:
         if not self.validate_message(trade_event):
             raise ValueError("Invalid message format")
 
         transformed_event = self.transform_message(trade_event)
         
-        mongo_start_time = time.time()
-        result = self.event_services.insert_event(transformed_event)
-        mongo_time = time.time() - mongo_start_time
-        
-        process_time = time.time() - start_time
-        self.stats.update(process_time, mongo_time)
+        result = await self.event_services.insert_event(transformed_event)
         
         if result['success']:
             self.logger.debug(f"Processed and buffered event: {transformed_event}")
@@ -169,26 +124,18 @@ class KafkaEventConsumer:
                 bootstrap_servers = self.config.get('KAFKA_BOOTSTRAP_SERVERS')
                 bootstrap_servers_list = [server.strip() for server in bootstrap_servers.split(',')]
                 self.logger.info(f"Attempting to connect to Kafka at {bootstrap_servers} (attempt {attempt + 1}/{max_retries})")
-                self.logger.info(f"KAFKA_TOPIC: {self.config.get('KAFKA_TOPIC')}")
-                self.logger.info(f"KAFKA_GROUP_ID: {self.config.get('KAFKA_GROUP_ID')}")
-                self.logger.info(f"Environment variable KAFKA_BOOTSTRAP_SERVERS: {os.getenv('KAFKA_BOOTSTRAP_SERVERS')}")
                 self.consumer = AIOKafkaConsumer(
                     self.config.get('KAFKA_TOPIC'),
                     bootstrap_servers=bootstrap_servers_list,
                     group_id=self.config.get('KAFKA_GROUP_ID'),
                     auto_offset_reset='earliest',
-                    enable_auto_commit=False,
-                    session_timeout_ms=45000,
-                    heartbeat_interval_ms=15000,
-                    max_poll_interval_ms=300000,
-                    max_poll_records=500
+                    enable_auto_commit=False
                 )
                 await self.consumer.start()
                 self.logger.info(f"Kafka consumer started. Listening to topic: {self.config.get('KAFKA_TOPIC')}")
                 return
             except KafkaConnectionError as e:
                 self.logger.error(f"Failed to connect to Kafka (attempt {attempt + 1}/{max_retries}). Error: {str(e)}")
-                self.logger.error(f"Error details: {e.__class__.__name__}: {str(e)}")
                 if attempt < max_retries - 1:
                     self.logger.info(f"Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
@@ -204,7 +151,7 @@ class KafkaEventConsumer:
                     break
                 try:
                     trade_event = json.loads(msg.value.decode('utf-8'))
-                    self.event_processor.process_message(trade_event)
+                    await self.event_processor.process_message(trade_event)
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Failed to decode message: {e}")
                 except ValueError as e:
@@ -213,10 +160,15 @@ class KafkaEventConsumer:
                     self.logger.error(f"Unexpected error processing message: {e}")
         finally:
             await self.consumer.stop()
-            self.event_processor.stats.log_stats()
 
     def stop(self):
         self.running = False
+
+async def periodic_flush(event_services: EventServicesBatch):
+    while True:
+        await asyncio.sleep(5)  # Check every minute
+        if time.time() - event_services.last_flush_time > event_services.flush_interval:
+            await event_services.flush_buffer()
 
 def setup_logger(name: str, log_file: str, level=logging.INFO) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -235,26 +187,70 @@ def setup_logger(name: str, log_file: str, level=logging.INFO) -> logging.Logger
 
 async def main():
     logger = setup_logger('event_processing', 'event_processing.log')
-    stats_logger = setup_logger('event_processing_stats', 'event_processing_stats.log')
     config = ConfigLoader(logger)
-    mongodb_helper = MongoDBHelperBatch(config={
+    
+    # Capture profiling report
+    profiler = pyinstrument.Profiler()
+    profiler.start()
+    
+    mongodb_helper = AsyncMongoDBHelperBatch(config={
         'MONGO_URI': config.get('MONGO_URI'),
         'MONGO_COLLECTION': config.get('MONGO_COLLECTION')
     }, logger=logger)
-    event_services = EventServicesBatch(db_helper=mongodb_helper, logger=logger)
-    event_processor = EventProcessor(event_services, logger, stats_logger)
+    await mongodb_helper.initialize()
+    
+    redis_helper = AsyncRedisHelperBatch(config={
+        'REDIS_HOST': config.get('REDIS_HOST'),
+        'REDIS_PORT': config.get('REDIS_PORT'),
+        'REDIS_DB': config.get('REDIS_DB')
+    }, logger=logger)
+    await redis_helper.initialize()
+    
+    event_services = EventServicesBatch(mongodb_helper, redis_helper, logger)
+    event_processor = EventProcessor(event_services, logger)
     kafka_consumer = KafkaEventConsumer(config, event_processor, logger)
 
+    # Start periodic flush task
+    flush_task = asyncio.create_task(periodic_flush(event_services))
+    
     try:
+        # Start time
+        start_time = time.time()
+
         await kafka_consumer.setup_consumer()
         await kafka_consumer.consume_messages()
+
+        # End time
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f"Execution time: {execution_time:.2f} seconds")
+
     except Exception as e:
         logger.error(f"An error occurred: {e}")
     except KeyboardInterrupt:
-        logger.info("Received interrupt, shutting down...")
+        
+        logger.info("Received keyboard interrupt. Stopping consumer...")
+
+        kafka_consumer.stop()
+        await event_services.manual_flush()
+        await mongodb_helper.close()
+        await redis_helper.close()
+        
+
+
     finally:
         kafka_consumer.stop()
-        event_services.flush_buffer()
+        await event_services.manual_flush()  # Ensure any remaining events are flushed
+        await mongodb_helper.close()
+        await redis_helper.close()
+        flush_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
+        
+        profiler.stop()
+        print(profiler.output_text(unicode=True, color=True))
 
 if __name__ == "__main__":
     asyncio.run(main())

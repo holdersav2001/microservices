@@ -20,36 +20,36 @@ from datetime import datetime
 from bson.objectid import ObjectId
 from typing import Dict, List, Any
 import logging
+from motor.motor_asyncio import AsyncIOMotorClient
 
-class MongoDBHelperBatch:
+class AsyncMongoDBHelperBatch:
     def __init__(self, config: Dict[str, str], logger: logging.Logger):
         self.config = config
         self.logger = logger
+        self.client = None
+        self.db = None
+        self.event_collection = None
+        self.metadata_collection = None
 
+
+    async def close(self):
+        if self.client:
+            self.client.close()
+            self.logger.info("MongoDB connection closed.")
+
+
+    async def initialize(self):
         try:
-            self.client = self._initialize_mongo(config)
+            self.client = AsyncIOMotorClient(self.config['MONGO_URI'])
             db_name = self.config['MONGO_URI'].split('/')[-1]
             self.db = self.client[db_name]
             self.event_collection = self.db[self.config['MONGO_COLLECTION']]
             self.metadata_collection = self.db['event_metadata']
+            self.logger.info("MongoDB connection established.")
         except Exception as e:
             self.logger.error(f"Error initializing MongoDB collections: {e}")
             raise
 
-    def close(self) -> None:
-        if hasattr(self, 'client'):
-            self.client.close()
-            self.logger.info("MongoDB connection closed.")
-
-    def _initialize_mongo(self, config: Dict[str, str]) -> MongoClient:
-        try:
-            client = MongoClient(config['MONGO_URI'])
-            # Verify connection
-            client.admin.command('ping')
-            return client
-        except ConnectionFailure as e:
-            self.logger.error("MongoDB connection failed.")
-            raise e
 
     def _serialize_id(self, doc: Any) -> Any:
         try:
@@ -66,7 +66,7 @@ class MongoDBHelperBatch:
             self.logger.error(f"Error in _serialize_id method: {str(e)}")
         return doc
 
-    def bulk_insert_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def bulk_insert_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             self.logger.info(f"Attempting to bulk insert {len(events)} documents")
             
@@ -79,7 +79,7 @@ class MongoDBHelperBatch:
             outcome_count = sum(1 for e in events if e.get('type') == 'outcome')
             self.logger.info(f"Inserting {event_count} events and {outcome_count} outcomes")
 
-            result = self.event_collection.insert_many(events)
+            result = await self.event_collection.insert_many(events)
             self.logger.info(f"Inserted {len(result.inserted_ids)} documents in bulk")
             
             return {
@@ -92,27 +92,27 @@ class MongoDBHelperBatch:
             self.logger.error(f"Error bulk inserting events: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
 
-    def query_events_by_date(self, business_date: str) -> Dict[str, Any]:
+    async def get_event_by_name_status_date(self, event_name: str, event_status: str, business_date: str) -> Dict[str, Any]:
         try:
-            events = list(self.event_collection.find({'businessDate': business_date}))
-            return {'success': True, 'data': self._serialize_id(events)}
-        except Exception as e:
-            self.logger.error(f"Error querying events by date: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def get_event_by_name_status_date(self, event_name: str, event_status: str, business_date: str) -> Dict[str, Any]:
-        try:
-            events = list(self.event_collection.find({
-                'businessDate': business_date,
+            cursor = self.event_collection.find({
                 'eventName': event_name,
-                'eventStatus': event_status
-            }))
-            self.logger.info(f"Retrieved {len(events)} events.")
-            return {'success': True, 'data': self._serialize_id(events)}
+                'eventStatus': event_status,
+                'businessDate': business_date
+            })
+            events = await cursor.to_list(length=None)
+            return {'success': True, 'data': events}
         except Exception as e:
             self.logger.error(f"Error retrieving events: {str(e)}")
             return {'success': False, 'error': str(e)}
 
+    async def query_events_by_date(self, business_date: str) -> Dict[str, Any]:
+        try:
+            cursor = self.event_collection.find({'businessDate': business_date})
+            events = await cursor.to_list(length=None)
+            return {'success': True, 'data': events}
+        except Exception as e:
+            self.logger.error(f"Error querying events by date: {e}")
+            return {'success': False, 'error': str(e)}
     def insert_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             self.event_collection.insert_one(event_data)

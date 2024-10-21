@@ -31,3 +31,49 @@
 
 # 2024-10-03 14:57:11.616777
 +/models
+
+# 2024-10-09 15:33:01.868388
++y
+
+# 2024-10-09 15:33:57.447549
++when I start docker-compose I get '2024-10-09 15:29:14 I1009 14:29:14.950353       1 kafka_exporter.go:823] Starting kafka_exporter (version=1.8.0, branch=master, revision=477643dd764c46ddd804ac4bd4022be877e3085b)
++2024-10-09 15:29:15 F1009 14:29:15.717664       1 kafka_exporter.go:924] Error Init Kafka Client: kafka: client has run out of available brokers to talk to: dial tcp 192.168.224.5:9092: connect: connection refused' for kafka-exporter. whats the issue ?
+
+# 2024-10-09 15:35:18.841008
++/run docker-compose down
+
+# 2024-10-09 15:35:45.218798
++/run docker-compose up -d
+
+# 2024-10-09 15:36:24.252291
++this hasnt stopped the issue I still get '2024-10-09 15:35:49 I1009 14:35:49.261995       1 kafka_exporter.go:823] Starting kafka_exporter (version=1.8.0, branch=master, revision=477643dd764c46ddd804ac4bd4022be877e3085b)
++2024-10-09 15:35:50 F1009 14:35:50.027478       1 kafka_exporter.go:924] Error Init Kafka Client: kafka: client has run out of available brokers to talk to: dial tcp 192.168.224.5:29092: connect: connection refused'
+
+# 2024-10-09 15:37:35.678874
++/run docker-compose down
+
+# 2024-10-09 15:38:00.997494
++/run docker-compose up -d
+
+# 2024-10-09 15:38:27.225205
++y
+
+# 2024-10-09 15:42:06.784514
++when I startup docker-compose I get '2024-10-09 15:41:24 I1009 14:41:24.741052       1 kafka_exporter.go:823] Starting kafka_exporter (version=1.8.0, branch=master, revision=477643dd764c46ddd804ac4bd4022be877e3085b)
++2024-10-09 15:41:25 F1009 14:41:25.520554       1 kafka_exporter.go:924] Error Init Kafka Client: kafka: client has run out of available brokers to talk to: dial tcp 192.168.224.5:29092: connect: connection refused' for the kafka-exporter
+
+# 2024-10-09 15:42:58.582142
++/run docker-compose down && docker-compose up -d
+
+# 2024-10-09 15:44:14.906739
++I still get '2024-10-09 15:43:32 I1009 14:43:32.148802       1 kafka_exporter.go:823] Starting kafka_exporter (version=1.8.0, branch=master, revision=477643dd764c46ddd804ac4bd4022be877e3085b)
++2024-10-09 15:43:32 F1009 14:43:32.916483       1 kafka_exporter.go:924] Error Init Kafka Client: kafka: client has run out of available brokers to talk to: dial tcp 192.168.224.5:9092: connect: connection refused'
+
+# 2024-10-09 15:44:39.232774
++n
+
+# 2024-10-09 15:45:18.650647
++is there any other way of export kafka statistcis to prometheus
+
+# 2024-10-09 15:45:56.875212
++n

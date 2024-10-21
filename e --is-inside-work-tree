@@ -1,0 +1,29 @@
+[33mcommit a00f9b41c5bd51b714740f58c3c47408246da865[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: holders <holdersav2000@yahoo.co.uk>
+Date:   Mon Oct 14 15:26:40 2024 +0100
+
+    basedline for 14102024 forgot 5 files
+
+[33mcommit 04522eb294805da50b7e20f28c07b6cb6ca8f488[m
+Author: holders <holdersav2000@yahoo.co.uk>
+Date:   Mon Oct 14 15:25:08 2024 +0100
+
+    basedline for 14102024 forgot 2 files
+
+[33mcommit aea87e28bed381a9f77d256939932418a17428bd[m
+Author: holders <holdersav2000@yahoo.co.uk>
+Date:   Mon Oct 14 15:24:33 2024 +0100
+
+    basedline for 14102024
+
+[33mcommit 75a6a5303508d3fe703d95b160906eba2fae4ac8[m
+Author: holders <holdersav2000@yahoo.co.uk>
+Date:   Tue Oct 8 18:32:50 2024 +0100
+
+    Update project configuration and add new files- working
+
+[33mcommit bd3fe65a0212c37a2da47ecb3e152deed4997a87[m
+Author: holders <holdersav2000@yahoo.co.uk>
+Date:   Tue Oct 8 18:29:52 2024 +0100
+
+    Fix Kafka configuration for internal and external connections

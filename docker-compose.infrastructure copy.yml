@@ -1,122 +1,46 @@
+version: '3.8'
+
 services:
   zookeeper:
-    image: wurstmeister/zookeeper
+    image: wurstmeister/zookeeper:latest
+    container_name: zookeeper-ms
     ports:
       - "2181:2181"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 2181 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    networks:
+      - kafka-network
 
   kafka:
-    image: wurstmeister/kafka
+    image: wurstmeister/kafka:latest
+    container_name: kafka-ms
     ports:
-      - "29092:29092"
+      - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_CREATE_TOPICS: "trade_events:1:1,trade_events_consumed:1:1,trade_events_errors:1:1"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_DELETE_TOPIC_ENABLE: "true"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      JMX_PORT: 9999
     depends_on:
-      zookeeper:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --list --bootstrap-server localhost:29092 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      - zookeeper
+    networks:
+      - kafka-network
 
   mongodb:
     image: mongo:latest
-    container_name: mongodb-realtime
+    container_name: mongodb-ms
     ports:
       - "27017:27017"
+    command: mongod --bind_ip_all
     volumes:
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       - mongodb_data:/data/db
-    command: mongod --wiredTigerCacheSizeGB 1.5
+    networks:
+      - kafka-network
 
-  redis:
-    image: redis:latest
-    ports:
-      - "6379:6379"
-
-  mongodb-exporter:
-    image: percona/mongodb_exporter:0.20
-    command:
-      - '--mongodb.uri=mongodb://mongodb:27017'
-    ports:
-      - "9216:9216"
-    depends_on:
-      - mongodb
-
-  kafka-exporter:
-    image: danielqsj/kafka-exporter:latest
-    command:
-      - '--kafka.server=kafka:29092'
-    ports:
-      - "9308:9308"
-    depends_on:
-      kafka:
-        condition: service_healthy
-
-  zookeeper-exporter:
-    image: dabealu/zookeeper-exporter:latest
-    environment:
-      ZK_SERVER: zookeeper:2181
-    ports:
-      - "9141:9141"
-    depends_on:
-      - zookeeper
-
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    environment:
-      REDIS_ADDR: redis:6379
-    ports:
-      - "9121:9121"
-    depends_on:
-      - redis
-
-  prometheus:
-    image: prom/prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-
-  grafana:
-    image: grafana/grafana
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-
-  pushgateway:
-    image: prom/pushgateway
-    ports:
-      - "9091:9091"
+networks:
+  kafka-network:
+    driver: bridge
 
 volumes:
   mongodb_data:
-
-networks:
-  default:
-    name: microservices-network
-    external: true
